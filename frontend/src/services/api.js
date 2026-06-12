@@ -97,4 +97,6 @@ export const importService = {
     return handleResponse(res);
   },
   getReport: (importId) => api.get(`/import/report/${importId}`),
+  getPendingApprovals: () => api.get('/import/approvals'),
+  actionApproval: (id, action) => api.post(`/import/approvals/${id}/action`, { action }),
 };

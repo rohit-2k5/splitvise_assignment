@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { importCSV, fetchReport } = require('../controllers/importController');
+const { importCSV, fetchReport, fetchPendingApprovals, actionApproval } = require('../controllers/importController');
 const { protect } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -27,5 +27,7 @@ router.use(protect);
 
 router.post('/csv', upload.single('file'), importCSV);
 router.get('/report/:id', fetchReport);
+router.get('/approvals', fetchPendingApprovals);
+router.post('/approvals/:id/action', actionApproval);
 
 module.exports = router;

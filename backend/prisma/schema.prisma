@@ -43,12 +43,14 @@ model Group {
 }
 
 model GroupMember {
-  id       String   @id @default(uuid())
-  groupId  String   @map("group_id")
-  group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId   String   @map("user_id")
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  joinedAt DateTime @default(now()) @map("joined_at")
+  id       String    @id @default(uuid())
+  groupId  String    @map("group_id")
+  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String    @map("user_id")
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime  @default(now()) @map("joined_at")
+  leftAt   DateTime? @map("left_at")
+  isActive Boolean   @default(true) @map("is_active")
 
   @@unique([groupId, userId])
   @@map("group_members")
@@ -62,17 +64,20 @@ enum SplitType {
 }
 
 model Expense {
-  id          String         @id @default(uuid())
-  groupId     String         @map("group_id")
-  group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  paidById    String         @map("paid_by_id")
-  paidBy      User           @relation("ExpensePayer", fields: [paidById], references: [id])
-  amount      Decimal        @db.Decimal(12, 2)
-  description String
-  createdAt   DateTime       @default(now()) @map("created_at")
+  id               String         @id @default(uuid())
+  groupId          String         @map("group_id")
+  group            Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  paidById         String         @map("paid_by_id")
+  paidBy           User           @relation("ExpensePayer", fields: [paidById], references: [id])
+  amount           Decimal        @db.Decimal(12, 2)
+  originalAmount   Decimal        @default(0.00) @db.Decimal(12, 2) @map("original_amount")
+  originalCurrency String         @default("INR") @map("original_currency")
+  convertedAmount  Decimal        @default(0.00) @db.Decimal(12, 2) @map("converted_amount")
+  description      String
+  createdAt        DateTime       @default(now()) @map("created_at")
 
-  splits      ExpenseSplit[]
-  messages    Message[]
+  splits           ExpenseSplit[]
+  messages         Message[]
 
   @@map("expenses")
 }
@@ -127,13 +132,27 @@ model Import {
 }
 
 model ImportAnomaly {
-  id          String   @id @default(uuid())
-  importId    String   @map("import_id")
-  import      Import   @relation(fields: [importId], references: [id], onDelete: Cascade)
-  rowNumber   Int      @map("row_number")
-  anomalyType String   @map("anomaly_type")
+  id          String           @id @default(uuid())
+  importId    String           @map("import_id")
+  import      Import           @relation(fields: [importId], references: [id], onDelete: Cascade)
+  rowNumber   Int              @map("row_number")
+  anomalyType String           @map("anomaly_type")
   description String
-  actionTaken String   @map("action_taken")
+  actionTaken String           @map("action_taken")
+  approvals   ImportApproval[]
 
   @@map("import_anomalies")
+}
+
+model ImportApproval {
+  id         String        @id @default(uuid())
+  anomalyId  String        @map("anomaly_id")
+  anomaly    ImportAnomaly @relation(fields: [anomalyId], references: [id], onDelete: Cascade)
+  action     String        // e.g. "CREATE_EXPENSE"
+  status     String        // "PENDING", "APPROVED", "REJECTED"
+  rowData    Json          @map("row_data")
+  approvedBy String?       @map("approved_by")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@map("import_approvals")
 }

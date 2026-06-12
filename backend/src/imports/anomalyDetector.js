@@ -95,13 +95,40 @@ const detectAnomalies = async (rawRow) => {
   }
 
   // 3. Validate Amount
-  const amountStr = row.amount ? row.amount.replace(/[^0-9.]/g, '') : ''; // Strip currency symbols
-  const amount = Number(amountStr);
-  if (isNaN(amount) || amount <= 0) {
+  const originalAmountStr = row.amount ? String(row.amount).trim() : '';
+  const hasMinus = originalAmountStr.includes('-');
+  
+  let originalCurrency = 'INR';
+  const lowerAmount = originalAmountStr.toLowerCase();
+  if (lowerAmount.includes('$') || lowerAmount.includes('usd')) {
+    originalCurrency = 'USD';
+  }
+
+  // Clean string keeping digits, decimal point, and minus sign
+  const amountStr = originalAmountStr.replace(/[^0-9.-]/g, '');
+  const parsedAmount = Number(amountStr);
+
+  if (isNaN(parsedAmount)) {
     anomalies.push({
       rowNumber,
       anomalyType: 'INVALID_AMOUNT',
-      description: `Amount '${row.amount}' is invalid or non-positive`,
+      description: `Amount '${row.amount}' is invalid`,
+      actionTaken: 'Skipped Row'
+    });
+    isValid = false;
+  } else if (parsedAmount < 0 || hasMinus) {
+    anomalies.push({
+      rowNumber,
+      anomalyType: 'INVALID_AMOUNT',
+      description: `Amount '${row.amount}' is negative (negative amounts are not allowed)`,
+      actionTaken: 'Skipped Row'
+    });
+    isValid = false;
+  } else if (parsedAmount === 0) {
+    anomalies.push({
+      rowNumber,
+      anomalyType: 'INVALID_AMOUNT',
+      description: `Amount '${row.amount}' is zero`,
       actionTaken: 'Skipped Row'
     });
     isValid = false;
@@ -111,6 +138,10 @@ const detectAnomalies = async (rawRow) => {
   if (!isValid) {
     return { isValid, anomalies, data: null };
   }
+
+  // Exchange rate decision: 1 USD = 83 INR (Fixed rate for simplicity and consistency)
+  const EXCHANGE_RATE = 83.0;
+  const convertedAmount = originalCurrency === 'USD' ? Number((parsedAmount * EXCHANGE_RATE).toFixed(2)) : parsedAmount;
 
   // 4. Validate Group
   let group = null;
@@ -167,27 +198,43 @@ const detectAnomalies = async (rawRow) => {
     isValid = false;
   } else {
     const payerEmailClean = row.paidBy.trim().toLowerCase();
-    const groupMemberObj = group.members.find(m => m.user.email.toLowerCase() === payerEmailClean);
-    if (!groupMemberObj) {
-      // Check if user exists but not in group, or doesn't exist at all
-      const userExists = await prisma.user.findUnique({
-        where: { email: payerEmailClean }
-      });
+    // Validate that payer was active on the parsed date (joinedAt <= parsedDate <= leftAt)
+    const groupMemberObj = group.members.find(m => 
+      m.user.email.toLowerCase() === payerEmailClean &&
+      new Date(parsedDate) >= new Date(m.joinedAt) &&
+      (!m.leftAt || new Date(parsedDate) <= new Date(m.leftAt))
+    );
 
-      if (!userExists) {
+    if (!groupMemberObj) {
+      // Check if user exists but wasn't active on that date, or is not in group, or not registered
+      const anyMembership = group.members.find(m => m.user.email.toLowerCase() === payerEmailClean);
+      if (anyMembership) {
         anomalies.push({
           rowNumber,
           anomalyType: 'PAYER_NOT_FOUND',
-          description: `Payer email '${row.paidBy}' is not registered on this platform`,
+          description: `Payer '${row.paidBy}' was not an active member of group on ${row.date}`,
           actionTaken: 'Skipped Row'
         });
       } else {
-        anomalies.push({
-          rowNumber,
-          anomalyType: 'PAYER_NOT_FOUND',
-          description: `Payer '${row.paidBy}' is registered but not a member of the group '${group.name}'`,
-          actionTaken: 'Skipped Row'
+        const userExists = await prisma.user.findUnique({
+          where: { email: payerEmailClean }
         });
+
+        if (!userExists) {
+          anomalies.push({
+            rowNumber,
+            anomalyType: 'PAYER_NOT_FOUND',
+            description: `Payer email '${row.paidBy}' is not registered on this platform`,
+            actionTaken: 'Skipped Row'
+          });
+        } else {
+          anomalies.push({
+            rowNumber,
+            anomalyType: 'PAYER_NOT_FOUND',
+            description: `Payer '${row.paidBy}' is registered but not a member of the group '${group.name}'`,
+            actionTaken: 'Skipped Row'
+          });
+        }
       }
       isValid = false;
     } else {
@@ -212,9 +259,6 @@ const detectAnomalies = async (rawRow) => {
     });
     isValid = false;
   } else {
-    // Splits formats:
-    // EQUAL: email1;email2;email3
-    // OTHERS: email1:val1;email2:val2
     const rawSplits = row.splits.split(';').map(s => s.trim()).filter(s => s !== '');
     if (rawSplits.length === 0) {
       anomalies.push({
@@ -251,24 +295,39 @@ const detectAnomalies = async (rawRow) => {
           }
         }
 
-        // Verify participant is in group
-        const participantObj = group.members.find(m => m.user.email.toLowerCase() === email);
+        // Verify participant is active in group on this date
+        const participantObj = group.members.find(m => 
+          m.user.email.toLowerCase() === email &&
+          new Date(parsedDate) >= new Date(m.joinedAt) &&
+          (!m.leftAt || new Date(parsedDate) <= new Date(m.leftAt))
+        );
+
         if (!participantObj) {
-          const userExists = await prisma.user.findUnique({ where: { email } });
-          if (!userExists) {
+          const anyMembership = group.members.find(m => m.user.email.toLowerCase() === email);
+          if (anyMembership) {
             anomalies.push({
               rowNumber,
               anomalyType: 'PARTICIPANT_NOT_FOUND',
-              description: `Participant email '${email}' is not registered on this platform`,
+              description: `Participant '${email}' was not active in group on ${row.date}`,
               actionTaken: 'Skipped Row'
             });
           } else {
-            anomalies.push({
-              rowNumber,
-              anomalyType: 'PARTICIPANT_NOT_FOUND',
-              description: `Participant '${email}' is not a member of the group '${group.name}'`,
-              actionTaken: 'Skipped Row'
-            });
+            const userExists = await prisma.user.findUnique({ where: { email } });
+            if (!userExists) {
+              anomalies.push({
+                rowNumber,
+                anomalyType: 'PARTICIPANT_NOT_FOUND',
+                description: `Participant email '${email}' is not registered on this platform`,
+                actionTaken: 'Skipped Row'
+              });
+            } else {
+              anomalies.push({
+                rowNumber,
+                anomalyType: 'PARTICIPANT_NOT_FOUND',
+                description: `Participant '${email}' is not a member of the group '${group.name}'`,
+                actionTaken: 'Skipped Row'
+              });
+            }
           }
           isValid = false;
           break;
@@ -284,11 +343,12 @@ const detectAnomalies = async (rawRow) => {
       if (isValid) {
         // Mathematical validation of totals
         if (splitType === 'UNEQUAL') {
-          if (Math.abs(splitSum - amount) > 0.01) {
+          // Validate splits in original currency
+          if (Math.abs(splitSum - parsedAmount) > 0.01) {
             anomalies.push({
               rowNumber,
               anomalyType: 'INVALID_SPLITS',
-              description: `Sum of unequal splits (₹${splitSum.toFixed(2)}) must equal total cost (₹${amount.toFixed(2)})`,
+              description: `Sum of unequal splits (${originalCurrency === 'USD' ? '$' : '₹'}${splitSum.toFixed(2)}) must equal total cost (${originalCurrency === 'USD' ? '$' : '₹'}${parsedAmount.toFixed(2)})`,
               actionTaken: 'Skipped Row'
             });
             isValid = false;
@@ -314,7 +374,17 @@ const detectAnomalies = async (rawRow) => {
             isValid = false;
           }
         }
-        splitsArray = validatedSplits;
+        
+        // Convert split values to converted amount (INR) if UNEQUAL
+        splitsArray = validatedSplits.map(s => {
+          if (splitType === 'UNEQUAL' && originalCurrency === 'USD') {
+            return {
+              userId: s.userId,
+              splitValue: Number((s.splitValue * EXCHANGE_RATE).toFixed(2))
+            };
+          }
+          return s;
+        });
       }
     }
   }
@@ -323,43 +393,112 @@ const detectAnomalies = async (rawRow) => {
     return { isValid, anomalies, data: null };
   }
 
+  // Check if it is a settlement/payment row
+  const settlementKeywords = ['payment', 'settlement', 'settle', 'refund', 'transfer', 'repayment', 'payback'];
+  const isSettlementRow = settlementKeywords.some(kw => cleanDescription.toLowerCase().includes(kw));
+
+  if (isSettlementRow) {
+    let receiverId = null;
+    const otherParticipant = splitsArray.find(s => s.userId !== payer.id);
+    if (otherParticipant) {
+      receiverId = otherParticipant.userId;
+    } else if (splitsArray.length > 0) {
+      receiverId = splitsArray[0].userId;
+    }
+
+    const rowDataPayload = {
+      groupId: group.id,
+      paidById: payer.id,
+      amount: convertedAmount,
+      originalAmount: parsedAmount,
+      originalCurrency,
+      convertedAmount,
+      description: cleanDescription,
+      createdAt: parsedDate,
+      splitType,
+      splits: splitsArray,
+      isSettlement: true,
+      receiverId
+    };
+
+    anomalies.push({
+      rowNumber,
+      anomalyType: 'SETTLEMENT_ROW',
+      description: `Row represents a settlement/payment rather than an expense (Description matches payment keywords)`,
+      actionTaken: 'Pending Approval'
+    });
+
+    return {
+      isValid: false, // Prevent direct expense creation
+      anomalies,
+      data: rowDataPayload,
+      isApprovalNeeded: true
+    };
+  }
+
   // 7. Validate Duplicate Expense
   const duplicate = await prisma.expense.findFirst({
     where: {
       groupId: group.id,
-      amount: amount,
+      amount: convertedAmount,
       description: cleanDescription,
       paidById: payer.id,
       createdAt: {
-        // Matches same calendar date
         gte: new Date(parsedDate.setHours(0,0,0,0)),
         lte: new Date(parsedDate.setHours(23,59,59,999))
       }
     }
   });
 
+  const rowDataPayload = {
+    groupId: group.id,
+    paidById: payer.id,
+    amount: convertedAmount,
+    originalAmount: parsedAmount,
+    originalCurrency,
+    convertedAmount,
+    description: cleanDescription,
+    createdAt: parsedDate,
+    splitType,
+    splits: splitsArray
+  };
+
   if (duplicate) {
     anomalies.push({
       rowNumber,
       anomalyType: 'DUPLICATE_EXPENSE',
-      description: `Expense '${cleanDescription}' with amount ₹${amount} already exists for this group and date`,
-      actionTaken: 'Skipped Row'
+      description: `Expense '${cleanDescription}' with amount ₹${convertedAmount} already exists for this group and date`,
+      actionTaken: 'Pending Approval'
     });
-    isValid = false;
+    
+    return {
+      isValid: false, // Do not auto-import
+      anomalies,
+      data: rowDataPayload,
+      isApprovalNeeded: true
+    };
+  }
+
+  // Check if it has any other soft anomaly like MISSING_DESCRIPTION to mark for approval
+  const hasMissingDesc = anomalies.some(a => a.anomalyType === 'MISSING_DESCRIPTION');
+  if (hasMissingDesc) {
+    // Modify the actionTaken from auto-assign to Pending Approval
+    const descAnomaly = anomalies.find(a => a.anomalyType === 'MISSING_DESCRIPTION');
+    if (descAnomaly) {
+      descAnomaly.actionTaken = 'Pending Approval';
+    }
+    return {
+      isValid: false, // Do not auto-import
+      anomalies,
+      data: rowDataPayload,
+      isApprovalNeeded: true
+    };
   }
 
   return {
     isValid,
     anomalies,
-    data: isValid ? {
-      groupId: group.id,
-      paidById: payer.id,
-      amount,
-      description: cleanDescription,
-      createdAt: parsedDate,
-      splitType,
-      splits: splitsArray
-    } : null
+    data: rowDataPayload
   };
 };
 

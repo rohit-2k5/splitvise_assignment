@@ -1,5 +1,53 @@
 const prisma = require('../config/prisma');
 
+const calculateSettlements = (memberBalances) => {
+  const balances = memberBalances.map(b => ({
+    userId: b.userId,
+    name: b.name,
+    netBalance: b.netBalance
+  }));
+
+  const debtors = balances.filter(b => b.netBalance < -0.01).sort((a, b) => a.netBalance - b.netBalance);
+  const creditors = balances.filter(b => b.netBalance > 0.01).sort((a, b) => b.netBalance - a.netBalance);
+
+  const simplified = [];
+
+  let dIdx = 0;
+  let cIdx = 0;
+
+  while (dIdx < debtors.length && cIdx < creditors.length) {
+    const debtor = debtors[dIdx];
+    const creditor = creditors[cIdx];
+
+    const oweAmount = Math.abs(debtor.netBalance);
+    const receiveAmount = creditor.netBalance;
+
+    const settledAmount = Number(Math.min(oweAmount, receiveAmount).toFixed(2));
+
+    if (settledAmount > 0.01) {
+      simplified.push({
+        fromUserId: debtor.userId,
+        fromName: debtor.name,
+        toUserId: creditor.userId,
+        toName: creditor.name,
+        amount: settledAmount
+      });
+    }
+
+    debtor.netBalance = Number((debtor.netBalance + settledAmount).toFixed(2));
+    creditor.netBalance = Number((creditor.netBalance - settledAmount).toFixed(2));
+
+    if (Math.abs(debtor.netBalance) < 0.01) {
+      dIdx++;
+    }
+    if (Math.abs(creditor.netBalance) < 0.01) {
+      cIdx++;
+    }
+  }
+
+  return simplified;
+};
+
 // @desc    Create a new group
 // @route   POST /api/groups
 // @access  Private
@@ -157,11 +205,15 @@ const getGroupDetails = async (req, res, next) => {
         userId: m.userId,
         name: m.user.name,
         email: m.user.email,
+        isActive: m.isActive,
+        joinedAt: m.joinedAt,
+        leftAt: m.leftAt,
         paid: 0.0,
         owed: 0.0,
         settledSent: 0.0,
         settledReceived: 0.0,
         netBalance: 0.0,
+        breakdown: [], // detailed expense breakdown
       };
     });
 
@@ -169,18 +221,29 @@ const getGroupDetails = async (req, res, next) => {
     group.expenses.forEach((expense) => {
       const payerId = expense.paidById;
       const amount = Number(expense.amount);
+      const payerName = balanceMap[payerId] ? balanceMap[payerId].name : 'Unknown';
 
       // Add to payer's total paid if they are in the group member list
       if (balanceMap[payerId]) {
         balanceMap[payerId].paid += amount;
       }
 
-      // Add to each split user's total owed
+      // Add to each split user's total owed and detailed breakdown
+      const participantsList = expense.splits.map(s => s.user.name).join(', ');
       expense.splits.forEach((split) => {
         const splitUserId = split.userId;
         const splitAmount = Number(split.amount);
         if (balanceMap[splitUserId]) {
           balanceMap[splitUserId].owed += splitAmount;
+          balanceMap[splitUserId].breakdown.push({
+            expenseId: expense.id,
+            description: expense.description,
+            amount: amount,
+            date: expense.createdAt,
+            payerName: payerName,
+            participants: participantsList,
+            userShare: splitAmount
+          });
         }
       });
     });
@@ -218,6 +281,9 @@ const getGroupDetails = async (req, res, next) => {
       return userBalance;
     });
 
+    // 4. Compute Simplified Settlements (Who Pays Whom)
+    const simplifiedDebts = calculateSettlements(balances);
+
     return res.status(200).json({
       success: true,
       data: {
@@ -230,11 +296,16 @@ const getGroupDetails = async (req, res, next) => {
           name: m.user.name,
           email: m.user.email,
           joinedAt: m.joinedAt,
+          leftAt: m.leftAt,
+          isActive: m.isActive,
         })),
         expenses: group.expenses.map((e) => ({
           id: e.id,
           description: e.description,
           amount: Number(e.amount),
+          originalAmount: Number(e.originalAmount || e.amount),
+          originalCurrency: e.originalCurrency || 'INR',
+          convertedAmount: Number(e.convertedAmount || e.amount),
           paidBy: e.paidBy,
           createdAt: e.createdAt,
           splits: e.splits.map((s) => ({
@@ -244,6 +315,7 @@ const getGroupDetails = async (req, res, next) => {
           })),
         })),
         balances,
+        simplifiedDebts,
         settlements: group.settlements,
       },
     });
@@ -298,7 +370,7 @@ const addMember = async (req, res, next) => {
       });
     }
 
-    // Check if user is already a member
+    // Check if user is already a member (active or soft-deleted)
     const existingMembership = await prisma.groupMember.findUnique({
       where: {
         groupId_userId: {
@@ -309,10 +381,42 @@ const addMember = async (req, res, next) => {
     });
 
     if (existingMembership) {
-      return res.status(400).json({
-        success: false,
-        message: 'User is already a member of this group',
-      });
+      if (existingMembership.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'User is already a member of this group',
+        });
+      } else {
+        // Reactivate soft-deleted member
+        const updatedMember = await prisma.groupMember.update({
+          where: {
+            groupId_userId: {
+              groupId,
+              userId: userToAdd.id,
+            },
+          },
+          data: {
+            isActive: true,
+            leftAt: null,
+            joinedAt: new Date(),
+          },
+          include: {
+            user: {
+              select: { id: true, name: true, email: true },
+            },
+          },
+        });
+        return res.status(200).json({
+          success: true,
+          message: 'Member re-added successfully',
+          data: {
+            userId: updatedMember.user.id,
+            name: updatedMember.user.name,
+            email: updatedMember.user.email,
+            joinedAt: updatedMember.joinedAt,
+          },
+        });
+      }
     }
 
     // Add member
@@ -395,13 +499,17 @@ const removeMember = async (req, res, next) => {
       });
     }
 
-    // Delete membership
-    await prisma.groupMember.delete({
+    // Soft delete membership by marking inactive and setting leftAt
+    await prisma.groupMember.update({
       where: {
         groupId_userId: {
           groupId,
           userId: userIdToRemove,
         },
+      },
+      data: {
+        isActive: false,
+        leftAt: new Date(),
       },
     });
 

@@ -1,4 +1,4 @@
-const { processCSVImport, getImportReport } = require('../imports/importService');
+const { processCSVImport, getImportReport, getPendingApprovals, processApproval } = require('../imports/importService');
 
 /**
  * @desc    Upload CSV file and process import
@@ -60,7 +60,54 @@ const fetchReport = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get all pending CSV approvals
+ * @route   GET /api/import/approvals
+ * @access  Private
+ */
+const fetchPendingApprovals = async (req, res, next) => {
+  try {
+    const approvals = await getPendingApprovals();
+    return res.status(200).json({
+      success: true,
+      data: approvals
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Approve or reject a pending CSV row anomaly
+ * @route   POST /api/import/approvals/:id/action
+ * @access  Private
+ */
+const actionApproval = async (req, res, next) => {
+  try {
+    const { action } = req.body;
+    const approvalId = req.params.id;
+
+    if (!['APPROVE', 'REJECT'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid action. Must be APPROVE or REJECT'
+      });
+    }
+
+    const result = await processApproval(approvalId, action, req.user.id);
+    return res.status(200).json({
+      success: true,
+      message: `Approval request ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully`,
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   importCSV,
-  fetchReport
+  fetchReport,
+  fetchPendingApprovals,
+  actionApproval
 };

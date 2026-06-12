@@ -27,6 +27,8 @@ const GroupDetails = () => {
   const [expenseSplits, setExpenseSplits] = useState({}); // { userId: value }
   const [expenseError, setExpenseError] = useState('');
   const [creatingExpense, setCreatingExpense] = useState(false);
+  const [expenseCurrency, setExpenseCurrency] = useState('INR');
+  const [expandedBalanceUserId, setExpandedBalanceUserId] = useState(null);
 
   // Settlement Modal State
   const [showSettleModal, setShowSettleModal] = useState(false);
@@ -196,7 +198,8 @@ const GroupDetails = () => {
         amount: amt,
         paidById: expensePayer,
         splitType: expenseSplitType,
-        splits: splitsPayload
+        splits: splitsPayload,
+        originalCurrency: expenseCurrency
       });
 
       if (res.success) {
@@ -374,13 +377,19 @@ const GroupDetails = () => {
               {group.members.map(member => (
                 <div key={member.userId} className="flex justify-between items-center py-3 first:pt-0 last:pb-0">
                   <div>
-                    <p className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <p className="text-sm font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                       {member.name} 
                       {member.userId === user.id && <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">You</span>}
+                      {!member.isActive && <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">Left</span>}
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">{member.email}</p>
+                    {member.leftAt && (
+                      <p className="text-[9px] text-slate-400 mt-0.5">
+                        Left group: {new Date(member.leftAt).toLocaleDateString()}
+                      </p>
+                    )}
                   </div>
-                  {isCreator && member.userId !== group.creator.id && (
+                  {isCreator && member.userId !== group.creator.id && member.isActive && (
                     <button
                       onClick={() => handleRemoveMember(member.userId)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
@@ -430,15 +439,73 @@ const GroupDetails = () => {
                 Group Balances
               </h3>
             </div>
-            <div className="p-4 divide-y divide-slate-100">
+            <div className="p-2 divide-y divide-slate-100">
               {group.balances.map(bal => (
-                <div key={bal.userId} className="flex justify-between items-center py-3 first:pt-0 last:pb-0 text-sm">
-                  <span className="font-medium text-slate-700">{bal.name}</span>
-                  <span className={`font-bold ${bal.netBalance > 0 ? 'text-emerald-600' : bal.netBalance < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                    {bal.netBalance > 0 ? `+₹${bal.netBalance}` : bal.netBalance < 0 ? `-₹${Math.abs(bal.netBalance)}` : '₹0.00'}
-                  </span>
+                <div key={bal.userId} className="rounded-xl overflow-hidden">
+                  <div
+                    onClick={() => setExpandedBalanceUserId(expandedBalanceUserId === bal.userId ? null : bal.userId)}
+                    className="flex justify-between items-center p-3 hover:bg-slate-50 transition-all cursor-pointer text-sm"
+                  >
+                    <div>
+                      <span className="font-medium text-slate-700 flex items-center gap-1">
+                        {bal.name}
+                        {!bal.isActive && <span className="text-[9px] font-semibold text-rose-500 bg-rose-50 px-1 py-0.2 rounded border border-rose-100">Left</span>}
+                      </span>
+                      <p className="text-[10px] text-slate-400">Click to view breakdown</p>
+                    </div>
+                    <span className={`font-bold ${bal.netBalance > 0 ? 'text-emerald-600' : bal.netBalance < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                      {bal.netBalance > 0 ? `+₹${bal.netBalance}` : bal.netBalance < 0 ? `-₹${Math.abs(bal.netBalance)}` : '₹0.00'}
+                    </span>
+                  </div>
+
+                  {expandedBalanceUserId === bal.userId && (
+                    <div className="bg-slate-50 px-4 py-3 border-t border-slate-100 space-y-2 animate-in slide-in-from-top-1 duration-150">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Expense Shares Breakdown</p>
+                      {bal.breakdown && bal.breakdown.length > 0 ? (
+                        bal.breakdown.map((item, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-xs py-1 border-b border-slate-100 last:border-b-0">
+                            <div className="text-slate-600">
+                              <span className="font-semibold text-slate-800">{item.description}</span>
+                              <p className="text-[10px] text-slate-400">Paid by {item.payerName}</p>
+                            </div>
+                            <span className="font-bold text-slate-700">₹{item.userShare.toFixed(2)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-[10px] text-slate-400 italic">No expense shares in this group</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Debt Simplification Card */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="border-b border-slate-200/80 px-5 py-4 bg-slate-50/50">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                <ArrowRightLeft className="h-4 w-4 text-slate-400" />
+                Who Pays Whom (Simplified)
+              </h3>
+            </div>
+            <div className="p-4 space-y-3">
+              {group.simplifiedDebts && group.simplifiedDebts.length > 0 ? (
+                group.simplifiedDebts.map((debt, index) => (
+                  <div key={index} className="flex items-center justify-between text-xs py-2 bg-slate-50 rounded-xl px-3 border border-slate-100">
+                    <div>
+                      <span className="font-bold text-slate-900">{debt.fromName}</span>
+                      <span className="text-slate-400 mx-1">pays</span>
+                      <span className="font-bold text-slate-900">{debt.toName}</span>
+                    </div>
+                    <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                      ₹{debt.amount}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-slate-400 text-center py-4">No outstanding debts to simplify!</p>
+              )}
             </div>
           </div>
 
@@ -494,7 +561,12 @@ const GroupDetails = () => {
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-xs text-slate-400 font-medium">Total Spent</p>
-                        <p className="text-sm font-extrabold text-slate-900">₹{expense.amount}</p>
+                        <p className="text-sm font-extrabold text-slate-900">
+                          {expense.originalCurrency === 'USD' ? `$${expense.originalAmount}` : `₹${expense.amount}`}
+                        </p>
+                        {expense.originalCurrency === 'USD' && (
+                          <p className="text-[10px] text-slate-400">Converted: ₹{expense.convertedAmount}</p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5">
@@ -532,8 +604,8 @@ const GroupDetails = () => {
                 </div>
               )}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
                   <input
                     type="text"
@@ -545,17 +617,31 @@ const GroupDetails = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Amount (₹)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    value={expenseAmount}
-                    onChange={(e) => setExpenseAmount(e.target.value)}
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Currency</label>
+                  <select
+                    value={expenseCurrency}
+                    onChange={(e) => setExpenseCurrency(e.target.value)}
                     className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3 text-slate-900 focus:border-emerald-500 focus:outline-none sm:text-sm"
-                  />
+                  >
+                    <option value="INR">INR (₹)</option>
+                    <option value="USD">USD ($)</option>
+                  </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Amount {expenseCurrency === 'USD' ? '($)' : '(₹)'}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={expenseAmount}
+                  onChange={(e) => setExpenseAmount(e.target.value)}
+                  className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3 text-slate-900 focus:border-emerald-500 focus:outline-none sm:text-sm"
+                />
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">

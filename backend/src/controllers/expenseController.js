@@ -122,7 +122,7 @@ const calculateSplits = (totalAmount, splitType, splitsInput) => {
 // @access  Private
 const createExpense = async (req, res, next) => {
   try {
-    const { groupId, amount, description, paidById, splitType, splits: splitsInput } = req.body;
+    const { groupId, amount, description, paidById, splitType, splits: splitsInput, originalCurrency = 'INR', createdAt } = req.body;
 
     // Validate inputs
     if (!groupId || !amount || !description || !paidById || !splitType || !splitsInput) {
@@ -132,13 +132,16 @@ const createExpense = async (req, res, next) => {
       });
     }
 
-    const expenseAmount = Number(amount);
-    if (isNaN(expenseAmount) || expenseAmount <= 0) {
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: 'Amount must be a positive number',
       });
     }
+
+    const exchangeRate = 83.0;
+    const convertedAmount = originalCurrency === 'USD' ? Number((parsedAmount * exchangeRate).toFixed(2)) : parsedAmount;
 
     // Verify group exists
     const group = await prisma.group.findUnique({
@@ -162,19 +165,21 @@ const createExpense = async (req, res, next) => {
       });
     }
 
-    // Check if payer is a member of the group
-    const isPayerMember = group.members.some(m => m.userId === paidById);
-    if (!isPayerMember) {
+    const expenseDate = createdAt ? new Date(createdAt) : new Date();
+
+    // Check if payer was an active member of the group on the expense date
+    const payerMember = group.members.find(m => m.userId === paidById);
+    if (!payerMember || !payerMember.isActive || (payerMember.leftAt && expenseDate > new Date(payerMember.leftAt)) || expenseDate < new Date(payerMember.joinedAt)) {
       return res.status(400).json({
         success: false,
-        message: 'Payer must be a member of the group',
+        message: 'Payer was not an active member of the group on the expense date',
       });
     }
 
-    // Calculate and validate splits
+    // Calculate and validate splits in original currency first
     let calculatedSplits;
     try {
-      calculatedSplits = calculateSplits(expenseAmount, splitType, splitsInput);
+      calculatedSplits = calculateSplits(parsedAmount, splitType, splitsInput);
     } catch (calcError) {
       return res.status(400).json({
         success: false,
@@ -182,13 +187,25 @@ const createExpense = async (req, res, next) => {
       });
     }
 
-    // Verify all split users are members of the group
-    const memberIds = group.members.map(m => m.userId);
-    const invalidUsers = calculatedSplits.filter(s => !memberIds.includes(s.userId));
-    if (invalidUsers.length > 0) {
+    // Now convert calculated splits to INR if original currency is USD
+    if (originalCurrency === 'USD') {
+      calculatedSplits = calculatedSplits.map(s => ({
+        userId: s.userId,
+        amount: Number((s.amount * exchangeRate).toFixed(2)),
+        splitValue: splitType === 'UNEQUAL' ? Number((s.splitValue * exchangeRate).toFixed(2)) : s.splitValue
+      }));
+    }
+
+    // Verify all split users were active members of the group on the expense date
+    const invalidParticipants = calculatedSplits.filter(s => {
+      const m = group.members.find(member => member.userId === s.userId);
+      return !m || !m.isActive || (m.leftAt && expenseDate > new Date(m.leftAt)) || expenseDate < new Date(m.joinedAt);
+    });
+
+    if (invalidParticipants.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'All split recipients must be members of the group',
+        message: 'One or more split participants were not active in the group on the expense date',
       });
     }
 
@@ -198,9 +215,13 @@ const createExpense = async (req, res, next) => {
       const newExpense = await tx.expense.create({
         data: {
           groupId,
-          amount: expenseAmount,
+          amount: convertedAmount,
+          originalAmount: parsedAmount,
+          originalCurrency,
+          convertedAmount,
           description: description.trim(),
           paidById,
+          createdAt: expenseDate,
         },
       });
 

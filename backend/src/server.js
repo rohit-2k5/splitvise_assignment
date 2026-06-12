@@ -8,6 +8,7 @@ const groupRoutes = require('./routes/groupRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const settlementRoutes = require('./routes/settlementRoutes');
 const messageRoutes = require('./routes/messageRoutes');
+const importRoutes = require('./routes/importRoutes');
 const prisma = require('./config/prisma');
 const { errorHandler } = require('./middleware/errorMiddleware');
 
@@ -38,6 +39,7 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/settlements', settlementRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/import', importRoutes);
 
 // Base health check
 app.get('/health', (req, res) => {

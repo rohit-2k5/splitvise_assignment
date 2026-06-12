@@ -365,4 +365,5 @@ module.exports = {
   createExpense,
   getExpenseDetails,
   deleteExpense,
+  calculateSplits,
 };

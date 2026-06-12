@@ -115,3 +115,25 @@ model Message {
 
   @@map("messages")
 }
+
+model Import {
+  id        String          @id @default(uuid())
+  filename  String
+  status    String          // "COMPLETED", "PARTIAL", "FAILED"
+  createdAt DateTime        @default(now()) @map("created_at")
+  anomalies ImportAnomaly[]
+
+  @@map("imports")
+}
+
+model ImportAnomaly {
+  id          String   @id @default(uuid())
+  importId    String   @map("import_id")
+  import      Import   @relation(fields: [importId], references: [id], onDelete: Cascade)
+  rowNumber   Int      @map("row_number")
+  anomalyType String   @map("anomaly_type")
+  description String
+  actionTaken String   @map("action_taken")
+
+  @@map("import_anomalies")
+}

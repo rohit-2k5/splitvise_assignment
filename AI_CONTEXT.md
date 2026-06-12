@@ -66,6 +66,10 @@ The application uses a relational PostgreSQL database. Below is the proposed tab
    * Fields: `id`, `group_id` (FK to `groups`), `sender_id` (FK to `users`), `receiver_id` (FK to `users`), `amount` (Decimal), `created_at`
 7. **Message (`messages`)**
    * Fields: `id`, `expense_id` (FK to `expenses`), `sender_id` (FK to `users`), `message_text`, `created_at`
+8. **Import (`imports`)**
+   * Fields: `id`, `filename`, `status`, `created_at`
+9. **ImportAnomaly (`import_anomalies`)**
+   * Fields: `id`, `import_id` (FK to `imports`), `row_number`, `anomaly_type`, `description`, `action_taken`
 
 ---
 
@@ -95,6 +99,10 @@ All backend APIs should be grouped by resource and prefixed with `/api`.
 
 ### Messages Router (`/api/messages`)
 * `GET /expense/:expenseId` - Fetch chat history for an expense
+
+### Import Router (`/api/import`)
+* `POST /csv` - Upload a CSV file and process imports with anomaly detection
+* `GET /report/:id` - Fetch the import run stats and anomaly logs
 
 ---
 
@@ -150,7 +158,12 @@ backend/
 │   │   ├── groupController.js
 │   │   ├── expenseController.js
 │   │   ├── settlementController.js
-│   │   └── messageController.js
+│   │   ├── messageController.js
+│   │   └── importController.js
+│   ├── imports/
+│   │   ├── csvParser.js
+│   │   ├── anomalyDetector.js
+│   │   └── importService.js
 │   ├── middleware/
 │   │   ├── authMiddleware.js
 │   │   └── errorMiddleware.js
@@ -159,7 +172,8 @@ backend/
 │   │   ├── groupRoutes.js
 │   │   ├── expenseRoutes.js
 │   │   ├── settlementRoutes.js
-│   │   └── messageRoutes.js
+│   │   ├── messageRoutes.js
+│   │   └── importRoutes.js
 │   └── server.js
 ├── .env
 ├── package.json
@@ -314,5 +328,28 @@ backend/
   * `leave_room` (inbound)
     * Payload: `{ "expenseId": "expense-uuid" }`
     * Description: Unsubscribes socket from the channel room `expense_<expenseId>`.
+
+---
+
+## 14. CSV Import and Anomaly Handling Module
+
+### CSV File Column Specifications
+* **`Date`**: YYYY-MM-DD format (must not be empty, invalid, or in the future).
+* **`Description`**: Text describing the bill. If missing, auto-assigns "Imported Expense - Row [N]".
+* **`Group`**: Group name or ID. Must exist in the database.
+* **`Amount`**: Numeric value > 0 representing the total expense cost.
+* **`Paid By`**: Email of the user who paid. Must exist in the database and be a member of the group.
+* **`Split Type`**: One of `EQUAL`, `UNEQUAL`, `PERCENTAGE`, `SHARE`.
+* **`Splits`**: Semicolon-separated list of user splits, formatted as `email:value` (e.g. `alice@example.com:50;bob@example.com:50`). For `EQUAL` splits, list of emails (e.g. `alice@example.com;bob@example.com`).
+
+### Anomaly Policies and Actions
+1. **`INVALID_DATE`**: Skip row, log anomaly.
+2. **`MISSING_DESCRIPTION`**: Auto-correct to default string, proceed with import.
+3. **`INVALID_AMOUNT`**: Skip row, log anomaly.
+4. **`GROUP_NOT_FOUND`**: Skip row, log anomaly.
+5. **`PAYER_NOT_FOUND`**: Skip row, log anomaly.
+6. **`INVALID_SPLITS`**: Skip row, log anomaly.
+7. **`PARTICIPANT_NOT_FOUND`**: Skip row, log anomaly.
+8. **`DUPLICATE_EXPENSE`**: Skip row, log anomaly.
 
 

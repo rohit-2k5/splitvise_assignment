@@ -77,3 +77,24 @@ export const settlementService = {
 export const messageService = {
   getExpenseMessages: (expenseId) => api.get(`/messages/expense/${expenseId}`),
 };
+
+// Import Service Endpoints
+export const importService = {
+  importCSV: async (file) => {
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const headers = {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+
+    const res = await fetch(`${API_BASE_URL}/import/csv`, {
+      method: 'POST',
+      headers,
+      body: formData
+    });
+    return handleResponse(res);
+  },
+  getReport: (importId) => api.get(`/import/report/${importId}`),
+};

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { groupService, importService } from '../services/api';
-import { Plus, Users, LogOut, TrendingUp, TrendingDown, DollarSign, Wallet, RefreshCw, UploadCloud, AlertTriangle, CheckCircle2, X, AlertCircle } from 'lucide-react';
+import { Plus, Users, LogOut, TrendingUp, TrendingDown, DollarSign, Wallet, RefreshCw, UploadCloud, AlertTriangle, CheckCircle2, X, AlertCircle, Download } from 'lucide-react';
 
 const Dashboard = () => {
   const [groups, setGroups] = useState([]);
@@ -67,6 +67,94 @@ const Dashboard = () => {
     } finally {
       setUploading(false);
     }
+  };
+
+  /**
+   * Generates and downloads a CSV export of the current import report
+   * using data already available in the importReport state.
+   * No additional API call is required.
+   */
+  const downloadImportReport = () => {
+    if (!importReport) return;
+
+    const { id, filename, status, createdAt, statistics, anomalies } = importReport;
+
+    // Derive row counts from available statistics
+    const totalAnomalyRows = statistics.totalAnomalies;
+    const failedRows = statistics.skippedRowsCount;
+    const pendingRows = anomalies.filter(
+      (a) => a.actionTaken === 'Queued for Approval' || a.actionTaken === 'Pending Approval'
+    ).length;
+    // Successful = not skipped, not aborted, not pending approval
+    const nonSuccessActions = new Set(['Skipped Row', 'Aborted Import', 'Queued for Approval', 'Pending Approval']);
+    const successfulRows = anomalies.filter((a) => !nonSuccessActions.has(a.actionTaken)).length;
+
+    // Build CSV lines
+    const lines = [];
+
+    // --- Section 1: Summary Header ---
+    lines.push('CSV Import Report');
+    lines.push(`Generated At,${new Date().toISOString()}`);
+    lines.push('');
+
+    // --- Section 2: Import Metadata ---
+    lines.push('Import Summary');
+    lines.push(`Import ID,${id}`);
+    lines.push(`Source File,"${filename || 'N/A'}"`);
+    lines.push(`Import Date,${createdAt ? new Date(createdAt).toLocaleString() : 'N/A'}`);
+    lines.push(`Run Status,${status}`);
+    lines.push(`Total Anomalies Detected,${totalAnomalyRows}`);
+    lines.push(`Skipped / Failed Rows,${failedRows}`);
+    lines.push(`Pending Approvals,${pendingRows}`);
+    lines.push(`Rows with Anomalies Imported,${successfulRows}`);
+    lines.push('');
+
+    // --- Section 3: Anomaly Detail Table ---
+    lines.push('Anomaly Details');
+    lines.push('Row Number,Anomaly Type,Issue Description,Action Taken,Approval Status');
+
+    if (anomalies.length === 0) {
+      lines.push(',,,, No anomalies detected — all rows imported cleanly.');
+    } else {
+      anomalies.forEach((anomaly) => {
+        // Determine approval status from actionTaken field
+        let approvalStatus = 'N/A';
+        if (anomaly.actionTaken === 'Approved by User') approvalStatus = 'APPROVED';
+        else if (anomaly.actionTaken === 'Rejected by User') approvalStatus = 'REJECTED';
+        else if (
+          anomaly.actionTaken === 'Queued for Approval' ||
+          anomaly.actionTaken === 'Pending Approval'
+        ) approvalStatus = 'PENDING';
+        else if (anomaly.actionTaken === 'Skipped Row') approvalStatus = 'SKIPPED';
+        else if (anomaly.actionTaken === 'Aborted Import') approvalStatus = 'ABORTED';
+
+        // Escape any commas or quotes inside fields
+        const escapeCSV = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+        lines.push(
+          [
+            anomaly.rowNumber,
+            escapeCSV(anomaly.anomalyType),
+            escapeCSV(anomaly.description),
+            escapeCSV(anomaly.actionTaken),
+            escapeCSV(approvalStatus),
+          ].join(',')
+        );
+      });
+    }
+
+    // Trigger browser download
+    const csvContent = lines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeFilename = (filename || 'import').replace(/[^a-z0-9_-]/gi, '_').replace(/\.csv$/i, '');
+    link.href = url;
+    link.setAttribute('download', `import_report_${safeFilename}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const fetchPendingApprovals = async () => {
@@ -614,7 +702,20 @@ const Dashboard = () => {
                     )}
                   </div>
 
-                  <div className="flex justify-end pt-2">
+                  <div className="flex justify-between items-center pt-2">
+                    {/* Download Report Button */}
+                    <button
+                      type="button"
+                      id="download-import-report-btn"
+                      onClick={downloadImportReport}
+                      className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition-all"
+                      title="Download this import report as a CSV file"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download Report
+                    </button>
+
+                    {/* Done & Close Button */}
                     <button
                       type="button"
                       onClick={() => {

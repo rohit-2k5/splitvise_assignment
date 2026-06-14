@@ -1,35 +1,28 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Landmark, ArrowRight, Mail, Lock } from 'lucide-react';
+import { SplitSquareVertical, ArrowRight, Mail, Lock, Sparkles } from 'lucide-react';
 
 const Login = () => {
-  const [email, setEmail] = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError]       = useState('');
   const [submitting, setSubmitting] = useState(false);
-  
-  const { login } = useAuth();
-  const navigate = useNavigate();
+
+  const { login }  = useAuth();
+  const navigate   = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
-    if (!email || !password) {
-      setError('Please fill in all fields');
-      return;
-    }
+    if (!email || !password) { setError('Please fill in all fields'); return; }
 
     setSubmitting(true);
     try {
       const res = await login(email, password);
-      if (res.success) {
-        navigate('/dashboard');
-      } else {
-        setError(res.message);
-      }
-    } catch (err) {
+      if (res.success) navigate('/dashboard');
+      else setError(res.message);
+    } catch {
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setSubmitting(false);
@@ -37,97 +30,109 @@ const Login = () => {
   };
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 px-4 py-12 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-8">
+    <div className="min-h-screen gradient-hero flex items-center justify-center px-4 py-12">
+      {/* Ambient glow orbs */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-40 -left-40 h-96 w-96 rounded-full bg-brand-600/10 blur-3xl" />
+        <div className="absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-violet-700/10 blur-3xl" />
+      </div>
+
+      <div className="w-full max-w-md space-y-8 animate-slide-up relative z-10">
+        {/* Logo & Heading */}
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-lg shadow-emerald-500/20">
-            <Landmark className="h-6 w-6" />
+          <div className="relative mb-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl gradient-brand shadow-glow-teal pulse-ring">
+              <SplitSquareVertical className="h-7 w-7 text-surface-900" />
+            </div>
           </div>
-          <h2 className="mt-6 text-3xl font-extrabold tracking-tight text-slate-900">
-            Welcome Back
-          </h2>
-          <p className="mt-2 text-sm text-slate-500">
-            Keep track of shared bills and settle debts effortlessly
+          <h1 className="text-3xl font-black tracking-tight text-white">
+            Welcome back
+          </h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Sign in to manage your shared expenses
           </p>
         </div>
 
-        <div className="glass rounded-2xl p-8 shadow-xl shadow-slate-100">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+        {/* Card */}
+        <div className="glass rounded-2xl p-8 shadow-card border border-white/5">
+          {/* Feature pill */}
+          <div className="flex items-center gap-1.5 mb-6 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 w-fit mx-auto">
+            <Sparkles className="h-3 w-3 text-brand-400" />
+            <span className="text-[11px] font-semibold text-brand-400 tracking-wide">SplitVise — Smart Bill Splitting</span>
+          </div>
+
+          <form className="space-y-5" onSubmit={handleSubmit}>
             {error && (
-              <div className="rounded-lg bg-red-50 p-3 text-sm font-medium text-red-600 border border-red-100">
-                {error}
+              <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-3.5 text-sm font-medium text-red-400 flex items-start gap-2">
+                <span>⚠</span> {error}
               </div>
             )}
 
+            {/* Email */}
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700">
+              <label htmlFor="email" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                 Email Address
               </label>
-              <div className="relative mt-1">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                  <Mail className="h-5 w-5" />
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500 pointer-events-none">
+                  <Mail className="h-4 w-4" />
                 </span>
                 <input
                   id="email"
-                  name="email"
                   type="email"
                   autoComplete="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-3 text-slate-900 placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none sm:text-sm transition-all"
+                  className="input-dark input-dark-icon"
                   placeholder="name@example.com"
                 />
               </div>
             </div>
 
+            {/* Password */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+              <label htmlFor="password" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                 Password
               </label>
-              <div className="relative mt-1">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                  <Lock className="h-5 w-5" />
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500 pointer-events-none">
+                  <Lock className="h-4 w-4" />
                 </span>
                 <input
                   id="password"
-                  name="password"
                   type="password"
                   autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-3 text-slate-900 placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none sm:text-sm transition-all"
+                  className="input-dark input-dark-icon"
                   placeholder="••••••••"
                 />
               </div>
             </div>
 
-            <div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="group relative flex w-full justify-center rounded-xl bg-emerald-600 py-3 px-4 text-sm font-semibold text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:bg-emerald-400 transition-all shadow-md shadow-emerald-600/10"
-              >
-                {submitting ? (
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                ) : (
-                  <>
-                    Sign In
-                    <span className="absolute inset-y-0 right-0 flex items-center pr-3">
-                      <ArrowRight className="h-4 w-4 text-emerald-100 group-hover:translate-x-0.5 transition-transform" />
-                    </span>
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="btn-brand w-full flex items-center justify-center gap-2 mt-2"
+            >
+              {submitting ? (
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-surface-900 border-t-transparent" />
+              ) : (
+                <>
+                  Sign In
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
           </form>
         </div>
 
         <p className="text-center text-sm text-slate-500">
           Don't have an account?{' '}
-          <Link to="/register" className="font-semibold text-emerald-600 hover:text-emerald-700 hover:underline">
-            Sign up now
+          <Link to="/register" className="font-semibold text-brand-400 hover:text-brand-300 transition-colors">
+            Create one free →
           </Link>
         </p>
       </div>
